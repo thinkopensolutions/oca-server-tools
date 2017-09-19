@@ -5,16 +5,18 @@
 from lxml import etree
 
 import odoo.tools as tools
-from odoo import api, models
+from odoo import api, models, fields
+from odoo.tools.safe_eval import safe_eval
 
 
 class MassEditingWizard(models.TransientModel):
     _name = 'mass.editing.wizard'
 
+    # filter_id = fields.Many2one('ir.filter', 'Filter')
     @api.model
     def fields_view_get(self, view_id=None, view_type='form', toolbar=False,
                         submenu=False):
-        result =\
+        result = \
             super(MassEditingWizard, self).fields_view_get(view_id=view_id,
                                                            view_type=view_type,
                                                            toolbar=toolbar,
@@ -23,7 +25,9 @@ class MassEditingWizard(models.TransientModel):
         if context.get('mass_editing_object'):
             mass_obj = self.env['mass.object']
             editing_data = mass_obj.browse(context.get('mass_editing_object'))
-            all_fields = {}
+            all_fields = {
+                'filter_id': {'relation': u'ir.filters', 'type': u'many2one', 'string': u'Filter (If selected, all valid records will be updated)', 'views': {},
+                              'domain' : [('model_id','=',context.get('active_model'))]}}
             xml_form = etree.Element('form', {
                 'string': tools.ustr(editing_data.name)
             })
@@ -31,6 +35,13 @@ class MassEditingWizard(models.TransientModel):
                 'colspan': '6',
                 'col': '6',
             })
+            # Add filter_id to view
+            etree.SubElement(xml_group, 'field', {
+                'name': 'filter_id',
+                # 'nolabel': '1',
+                'colspan': '4',
+            })
+
             etree.SubElement(xml_group, 'label', {
                 'string': '',
                 'colspan': '2',
@@ -238,6 +249,7 @@ class MassEditingWizard(models.TransientModel):
                 self._context.get('active_ids')):
             model_obj = self.env[self._context.get('active_model')]
             values = {}
+            filter_id = vals.get('filter_id', False)
             for key, val in vals.items():
                 if key.startswith('selection_'):
                     split_key = key.split('__', 1)[1]
@@ -253,7 +265,12 @@ class MassEditingWizard(models.TransientModel):
                             m2m_list.append((4, m2m_id))
                         values.update({split_key: m2m_list})
             if values:
-                model_obj.browse(self._context.get('active_ids')).write(values)
+                active_ids = self._context.get('active_ids')
+                if filter_id:
+                    filter = self.env['ir.filters'].browse(filter_id)
+                    domain = safe_eval(filter.domain)
+                    active_ids = model_obj.search(domain).ids
+                model_obj.browse(active_ids).write(values)
         return super(MassEditingWizard, self).create({})
 
     @api.multi
